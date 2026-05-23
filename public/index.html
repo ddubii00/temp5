@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Market Top Boards</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow" id="eyebrow">Korea Market Cap</p>
+        <h1 id="pageTitle">오늘 KOSPI 시가총액 Top 100</h1>
+      </div>
+      <button class="refresh-button" id="refreshButton" type="button">
+        새로고침
+      </button>
+    </header>
+
+    <main>
+      <nav class="market-tabs" aria-label="시장 선택">
+        <button class="market-tab is-active" type="button" data-market="kospi">
+          KOSPI Top 100
+        </button>
+        <button class="market-tab" type="button" data-market="nasdaq100">
+          NASDAQ 100
+        </button>
+        <button class="market-tab" type="button" data-market="dow">
+          Dow
+        </button>
+      </nav>
+
+      <section class="status-band" aria-live="polite">
+        <div>
+          <span class="label">기준</span>
+          <strong id="sourceLabel">-</strong>
+        </div>
+        <div>
+          <span class="label">업데이트</span>
+          <strong id="updatedAt">-</strong>
+        </div>
+        <div>
+          <span class="label">표시</span>
+          <strong id="visibleCount">0개</strong>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="시장 요약">
+        <article>
+          <span>상승</span>
+          <strong class="up" id="upCount">0</strong>
+        </article>
+        <article>
+          <span>하락</span>
+          <strong class="down" id="downCount">0</strong>
+        </article>
+        <article>
+          <span>평균 등락률</span>
+          <strong id="avgRate">0.00%</strong>
+        </article>
+        <article>
+          <span id="fourthMetricLabel">시총 합계</span>
+          <strong id="totalMarketCap">0조</strong>
+        </article>
+      </section>
+
+      <section class="controls" aria-label="목록 제어">
+        <label class="search-box">
+          <span>검색</span>
+          <input id="searchInput" type="search" placeholder="종목명 또는 코드" />
+        </label>
+        <label>
+          <span>등락</span>
+          <select id="directionFilter">
+            <option value="all">전체</option>
+            <option value="up">상승</option>
+            <option value="down">하락</option>
+            <option value="flat">보합</option>
+          </select>
+        </label>
+        <label>
+          <span>정렬</span>
+          <select id="sortSelect">
+            <option value="rank">시총 순위</option>
+            <option value="changeRate">등락률</option>
+            <option value="price">현재가</option>
+            <option value="marketCap">시가총액</option>
+            <option value="volume">거래량</option>
+            <option value="name">종목명</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="table-wrap" aria-label="KOSPI 시가총액 상위 100개 종목">
+        <div class="message" id="message">데이터를 불러오는 중입니다.</div>
+        <table>
+          <thead>
+            <tr>
+              <th id="rankHeader">시총 순위</th>
+              <th>종목</th>
+              <th class="numeric">현재가</th>
+              <th class="numeric">등락률</th>
+              <th class="numeric">전일비</th>
+              <th class="numeric" id="extraHeader">시가총액(억)</th>
+              <th class="numeric">거래량</th>
+            </tr>
+          </thead>
+          <tbody id="stockRows"></tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>
