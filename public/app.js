@@ -164,6 +164,13 @@ function marketCapToJo(value) {
   return `${rateFormatter.format(value / 10000)}조`;
 }
 
+function eokToJo(value) {
+  if (!Number.isFinite(value)) {
+    return "N/A";
+  }
+  return `${rateFormatter.format(value / 10000)}조`;
+}
+
 function formatUsdMarketCap(value) {
   if (!Number.isFinite(value)) {
     return "-";
@@ -202,8 +209,7 @@ function currentSortOptions() {
     { label: "거래량", value: "volume" },
     { label: "PER", value: "per" },
     { label: "ROE", value: "roe" },
-    { label: "영업이익 증가율", value: "operatingProfitGrowth" },
-    { label: "PEG", value: "peg" },
+    { label: "PBR", value: "pbr" },
     { label: "종목명", value: "name" },
   ];
 
@@ -304,7 +310,7 @@ function updateMetrics(visibleItems) {
 
 function extraCell(stock) {
   if (state.meta.extraType === "marketCap") {
-    return `<td class="numeric">${formatNumber(stock.marketCap)}</td>`;
+    return `<td class="numeric">${marketCapToJo(stock.marketCap)}</td>`;
   }
 
   if (state.meta.extraType === "marketCapUsd") {
@@ -335,10 +341,10 @@ function renderRows(items) {
           </td>
           <td class="numeric ${movement}">${escapeHtml(formatChange(stock))}</td>
           ${extraCell(stock)}
+          <td class="numeric muted-value">${eokToJo(stock.operatingProfit)}</td>
           <td class="numeric">${formatPlainNumber(stock.per)}</td>
           <td class="numeric">${Number.isFinite(stock.roe) ? `${formatPlainNumber(stock.roe)}%` : "-"}</td>
-          <td class="numeric muted-value">${formatUnavailableMetric(stock.operatingProfitGrowth, "%")}</td>
-          <td class="numeric muted-value">${formatUnavailableMetric(stock.peg)}</td>
+          <td class="numeric muted-value">${formatUnavailableMetric(stock.pbr)}</td>
           <td class="numeric">${formatNumber(stock.volume)}</td>
         </tr>`;
     })
@@ -349,7 +355,8 @@ function updateChrome() {
   els.eyebrow.textContent = state.meta.eyebrow || marketLabels[state.market];
   els.pageTitle.textContent = state.meta.title || marketLabels[state.market];
   els.rankHeader.textContent = state.meta.rankLabel || "순서";
-  els.extraHeader.textContent = state.meta.extraLabel || "섹터";
+  els.extraHeader.textContent =
+    state.meta.extraType === "marketCap" ? "시가총액(조)" : state.meta.extraLabel || "섹터";
   els.extraHeader.className =
     state.meta.extraType === "marketCap" || state.meta.extraType === "marketCapUsd"
       ? "numeric"
