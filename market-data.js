@@ -240,6 +240,8 @@ function parseMarketCapPage(html) {
       volumeText: numberCells[7] || "",
       per: parseNumeric(numberCells[8]),
       roe: parseNumeric(numberCells[9]),
+      operatingProfitGrowth: null,
+      peg: null,
       detailUrl: `https://finance.naver.com/item/main.naver?code=${code}`,
     });
   }
@@ -553,6 +555,10 @@ async function fetchStooqQuoteOnce(symbol) {
     volumeText: Number.isFinite(parseNumeric(cells[7]))
       ? parseNumeric(cells[7]).toLocaleString("en-US")
       : "",
+    per: null,
+    roe: null,
+    operatingProfitGrowth: null,
+    peg: null,
     currency: "USD",
     detailUrl: `https://stooq.com/q/?s=${encodeURIComponent(stooqCode)}`,
   };
@@ -589,6 +595,10 @@ async function enrichUsMarket(contributors, marketId) {
         changeRateText: "",
         volume: null,
         volumeText: "",
+        per: item.per ?? null,
+        roe: item.roe ?? null,
+        operatingProfitGrowth: item.operatingProfitGrowth ?? null,
+        peg: item.peg ?? null,
         currency: "USD",
         detailUrl: `https://stooq.com/q/?s=${encodeURIComponent(stooqSymbol(item.code))}`,
         quoteError: error.message,

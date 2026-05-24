@@ -79,6 +79,17 @@ function formatRate(value, fallback) {
   return `${sign}${rateFormatter.format(value)}%`;
 }
 
+function formatPlainNumber(value, digits = 2) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+
+  return value.toLocaleString("ko-KR", {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  });
+}
+
 function formatPrice(stock) {
   if (stock.priceText) {
     return stock.currency === "USD" ? `$${stock.priceText}` : stock.priceText;
@@ -181,6 +192,10 @@ function currentSortOptions() {
     { label: "등락률", value: "changeRate" },
     { label: "현재가", value: "price" },
     { label: "거래량", value: "volume" },
+    { label: "PER", value: "per" },
+    { label: "ROE", value: "roe" },
+    { label: "영업이익 증가율", value: "operatingProfitGrowth" },
+    { label: "PEG", value: "peg" },
     { label: "종목명", value: "name" },
   ];
 
@@ -312,6 +327,10 @@ function renderRows(items) {
           </td>
           <td class="numeric ${movement}">${escapeHtml(formatChange(stock))}</td>
           ${extraCell(stock)}
+          <td class="numeric">${formatPlainNumber(stock.per)}</td>
+          <td class="numeric">${Number.isFinite(stock.roe) ? `${formatPlainNumber(stock.roe)}%` : "-"}</td>
+          <td class="numeric">${Number.isFinite(stock.operatingProfitGrowth) ? `${formatPlainNumber(stock.operatingProfitGrowth)}%` : "-"}</td>
+          <td class="numeric">${formatPlainNumber(stock.peg)}</td>
           <td class="numeric">${formatNumber(stock.volume)}</td>
         </tr>`;
     })
