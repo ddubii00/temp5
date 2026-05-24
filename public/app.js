@@ -90,6 +90,14 @@ function formatPlainNumber(value, digits = 2) {
   });
 }
 
+function formatUnavailableMetric(value, suffix = "") {
+  if (!Number.isFinite(value)) {
+    return "N/A";
+  }
+
+  return `${formatPlainNumber(value)}${suffix}`;
+}
+
 function formatPrice(stock) {
   if (stock.priceText) {
     return stock.currency === "USD" ? `$${stock.priceText}` : stock.priceText;
@@ -329,8 +337,8 @@ function renderRows(items) {
           ${extraCell(stock)}
           <td class="numeric">${formatPlainNumber(stock.per)}</td>
           <td class="numeric">${Number.isFinite(stock.roe) ? `${formatPlainNumber(stock.roe)}%` : "-"}</td>
-          <td class="numeric">${Number.isFinite(stock.operatingProfitGrowth) ? `${formatPlainNumber(stock.operatingProfitGrowth)}%` : "-"}</td>
-          <td class="numeric">${formatPlainNumber(stock.peg)}</td>
+          <td class="numeric muted-value">${formatUnavailableMetric(stock.operatingProfitGrowth, "%")}</td>
+          <td class="numeric muted-value">${formatUnavailableMetric(stock.peg)}</td>
           <td class="numeric">${formatNumber(stock.volume)}</td>
         </tr>`;
     })

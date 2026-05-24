@@ -189,6 +189,10 @@ main {
   color: var(--flat);
 }
 
+.muted-value {
+  color: var(--muted);
+}
+
 .controls {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 180px 200px;
