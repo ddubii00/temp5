@@ -23,6 +23,7 @@ const state = {
 
 const marketLabels = {
   dow: "Dow",
+  kosdaq: "KOSDAQ Top 50",
   kospi: "KOSPI Top 100",
   nasdaq100: "NASDAQ 100",
 };
@@ -144,6 +145,26 @@ function marketCapToJo(value) {
   return `${rateFormatter.format(value / 10000)}조`;
 }
 
+function formatUsdMarketCap(value) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+
+  if (value >= 1_000_000_000_000) {
+    return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+  }
+
+  if (value >= 1_000_000_000) {
+    return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  }
+
+  if (value >= 1_000_000) {
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+  }
+
+  return `$${formatNumber(Math.round(value))}`;
+}
+
 function averageVolumeText(items) {
   const volumes = items.map((item) => item.volume).filter((value) => Number.isFinite(value));
   if (!volumes.length) {
@@ -163,7 +184,7 @@ function currentSortOptions() {
     { label: "종목명", value: "name" },
   ];
 
-  if (state.meta.extraType === "marketCap") {
+  if (state.meta.extraType === "marketCap" || state.meta.extraType === "marketCapUsd") {
     options.splice(3, 0, { label: "시가총액", value: "marketCap" });
   }
 
@@ -247,6 +268,12 @@ function updateMetrics(visibleItems) {
       0,
     );
     els.totalMarketCap.textContent = marketCapToJo(marketCapTotal);
+  } else if (state.meta.extraType === "marketCapUsd") {
+    const marketCapTotal = state.items.reduce(
+      (sum, item) => sum + (Number.isFinite(item.marketCap) ? item.marketCap : 0),
+      0,
+    );
+    els.totalMarketCap.textContent = formatUsdMarketCap(marketCapTotal);
   } else {
     els.totalMarketCap.textContent = averageVolumeText(state.items);
   }
@@ -255,6 +282,10 @@ function updateMetrics(visibleItems) {
 function extraCell(stock) {
   if (state.meta.extraType === "marketCap") {
     return `<td class="numeric">${formatNumber(stock.marketCap)}</td>`;
+  }
+
+  if (state.meta.extraType === "marketCapUsd") {
+    return `<td class="numeric">${escapeHtml(stock.marketCapText || formatUsdMarketCap(stock.marketCap))}</td>`;
   }
 
   return `<td><span class="sector">${escapeHtml(stock.sector || "-")}</span></td>`;
@@ -292,7 +323,10 @@ function updateChrome() {
   els.pageTitle.textContent = state.meta.title || marketLabels[state.market];
   els.rankHeader.textContent = state.meta.rankLabel || "순서";
   els.extraHeader.textContent = state.meta.extraLabel || "섹터";
-  els.extraHeader.className = state.meta.extraType === "marketCap" ? "numeric" : "";
+  els.extraHeader.className =
+    state.meta.extraType === "marketCap" || state.meta.extraType === "marketCapUsd"
+      ? "numeric"
+      : "";
   els.fourthMetricLabel.textContent = state.meta.metricLabel || "평균 거래량";
 
   els.marketButtons.forEach((button) => {

@@ -1,7 +1,10 @@
-const NAVER_MARKET_SUM_URL =
-  "https://finance.naver.com/sise/sise_market_sum.naver?sosok=0&page=";
+const NAVER_MARKET_SUM_URL = "https://finance.naver.com/sise/sise_market_sum.naver";
 const WIKI_NASDAQ_100_URL = "https://en.wikipedia.org/wiki/Nasdaq-100";
 const WIKI_DOW_URL = "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average";
+const MARKETCAP_NASDAQ_100_URL =
+  "https://marketcap.company/stock-indices/nasdaq-100-index-market-cap/";
+const MARKETCAP_DOW_URL =
+  "https://marketcap.company/stock-indices/dow-jones-industrial-average-index-market-cap/";
 const STOOQ_QUOTE_URL = "https://stooq.com/q/l/";
 const CACHE_TTL_MS = 45_000;
 const US_QUOTE_CONCURRENCY = 4;
@@ -24,18 +27,32 @@ const markets = {
     metricLabel: "시총 합계",
     currency: "KRW",
   },
+  kosdaq: {
+    id: "kosdaq",
+    label: "KOSDAQ Top 50",
+    title: "오늘 KOSDAQ 시가총액 Top 50",
+    eyebrow: "Korea Growth Market",
+    sourceName: "Naver Finance",
+    sourceUrl: "https://finance.naver.com/sise/sise_market_sum.naver?sosok=1",
+    timezone: "Asia/Seoul",
+    rankLabel: "시총 순위",
+    extraLabel: "시가총액(억)",
+    extraType: "marketCap",
+    metricLabel: "시총 합계",
+    currency: "KRW",
+  },
   nasdaq100: {
     id: "nasdaq100",
     label: "NASDAQ 100",
     title: "NASDAQ 100 구성종목",
     eyebrow: "US Growth Index",
-    sourceName: "Wikipedia + Stooq",
-    sourceUrl: WIKI_NASDAQ_100_URL,
+    sourceName: "MarketCap.Company + Stooq",
+    sourceUrl: MARKETCAP_NASDAQ_100_URL,
     timezone: "America/New_York",
-    rankLabel: "순서",
-    extraLabel: "섹터",
-    extraType: "sector",
-    metricLabel: "평균 거래량",
+    rankLabel: "시총 순위",
+    extraLabel: "시가총액",
+    extraType: "marketCapUsd",
+    metricLabel: "시총 합계",
     currency: "USD",
   },
   dow: {
@@ -43,13 +60,13 @@ const markets = {
     label: "Dow",
     title: "Dow Jones 구성종목",
     eyebrow: "US Blue Chips",
-    sourceName: "Wikipedia + Stooq",
-    sourceUrl: WIKI_DOW_URL,
+    sourceName: "MarketCap.Company + Stooq",
+    sourceUrl: MARKETCAP_DOW_URL,
     timezone: "America/New_York",
-    rankLabel: "순서",
-    extraLabel: "섹터",
-    extraType: "sector",
-    metricLabel: "평균 거래량",
+    rankLabel: "시총 순위",
+    extraLabel: "시가총액",
+    extraType: "marketCapUsd",
+    metricLabel: "시총 합계",
     currency: "USD",
   },
 };
@@ -106,6 +123,45 @@ function formatUsd(value) {
         minimumFractionDigits: 2,
       })
     : "";
+}
+
+function formatUsdMarketCap(value) {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+
+  if (value >= 1_000_000_000_000) {
+    return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+  }
+
+  if (value >= 1_000_000_000) {
+    return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  }
+
+  if (value >= 1_000_000) {
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+  }
+
+  return `$${value.toLocaleString("en-US")}`;
+}
+
+function parseUsdMarketCap(text) {
+  const value = parseNumeric(text);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const normalized = String(text || "").toLowerCase();
+  if (normalized.includes("trillion") || /\bt\b/.test(normalized)) {
+    return value * 1_000_000_000_000;
+  }
+  if (normalized.includes("billion") || /\bb\b/.test(normalized)) {
+    return value * 1_000_000_000;
+  }
+  if (normalized.includes("million") || /\bm\b/.test(normalized)) {
+    return value * 1_000_000;
+  }
+  return value;
 }
 
 function signedText(value, formatter = (number) => String(number)) {
@@ -191,8 +247,12 @@ function parseMarketCapPage(html) {
   return rows;
 }
 
-async function fetchMarketCapPage(page) {
-  const response = await fetch(`${NAVER_MARKET_SUM_URL}${page}`, {
+async function fetchMarketCapPage(sosok, page) {
+  const params = new URLSearchParams({
+    page: String(page),
+    sosok: String(sosok),
+  });
+  const response = await fetch(`${NAVER_MARKET_SUM_URL}?${params.toString()}`, {
     headers: {
       "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
       "User-Agent":
@@ -210,17 +270,28 @@ async function fetchMarketCapPage(page) {
 }
 
 async function getKospiTop100(forceRefresh = false) {
-  return getCachedMarket("kospi", forceRefresh, async () => {
-    const pages = await Promise.all([1, 2].map((page) => fetchMarketCapPage(page)));
-    const items = pages.flat().sort((a, b) => a.rank - b.rank).slice(0, 100);
+  return getKoreanMarket("kospi", 0, 100, forceRefresh);
+}
 
-    if (items.length < 100) {
-      throw new Error(`Expected 100 rows, received ${items.length}`);
+async function getKosdaqTop50(forceRefresh = false) {
+  return getKoreanMarket("kosdaq", 1, 50, forceRefresh);
+}
+
+async function getKoreanMarket(marketId, sosok, count, forceRefresh = false) {
+  return getCachedMarket(marketId, forceRefresh, async () => {
+    const pageCount = Math.ceil(count / 50);
+    const pages = await Promise.all(
+      Array.from({ length: pageCount }, (_, index) => fetchMarketCapPage(sosok, index + 1)),
+    );
+    const items = pages.flat().sort((a, b) => a.rank - b.rank).slice(0, count);
+
+    if (items.length < count) {
+      throw new Error(`Expected ${count} rows, received ${items.length}`);
     }
-
+    const config = markets[marketId];
     return {
-      ...markets.kospi,
-      market: "KOSPI",
+      ...config,
+      market: config.label,
       count: items.length,
       items,
     };
@@ -265,6 +336,87 @@ function findWikiTable(html, matcher) {
   }
 
   return table;
+}
+
+function parseMarketCapCompanyRows(html, limit) {
+  const rowRegex = /<tr[^>]*class=["'][^"']*constituent-row[^"']*["'][^>]*>([\s\S]*?)<\/tr>/gi;
+  const rows = [];
+
+  for (const match of html.matchAll(rowRegex)) {
+    const row = match[1];
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((cell) =>
+      cleanText(cell[1]),
+    );
+    const name = cleanText(row.match(/class=["']company-link["'][^>]*>([\s\S]*?)<\/a>/i)?.[1] || "");
+    const symbolCell = cleanText(
+      row.match(/class=["']company-symbol["'][^>]*>([\s\S]*?)<\/small>/i)?.[1] || "",
+    );
+    const code = symbolCell.split(":").pop();
+    const rank = parseNumeric(cells[0]);
+    const marketCapText = cells[3] || "";
+    const marketCap = parseUsdMarketCap(marketCapText);
+
+    if (!code || !name || !Number.isFinite(rank)) {
+      continue;
+    }
+
+    rows.push({
+      rank,
+      code,
+      name,
+      sector: cells[4] || "",
+      industry: cells[5] || "",
+      marketCap,
+      marketCapText: marketCapText.replace(/\s+/g, " "),
+      price: parseNumeric(cells[6]),
+      priceText: cells[6]?.replace(/^\$/, "") || "",
+      changeRate: parseNumeric(cells[7]),
+      changeRateText: cells[7] || "",
+      changeDirection: String(cells[7] || "").includes("-") ? "하락" : "상승",
+      currency: "USD",
+    });
+  }
+
+  return rows
+    .sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0))
+    .slice(0, limit)
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+      marketCapText: item.marketCapText || formatUsdMarketCap(item.marketCap),
+    }));
+}
+
+async function fetchUsMarketCapRanking(marketId) {
+  const url = marketId === "nasdaq100" ? MARKETCAP_NASDAQ_100_URL : MARKETCAP_DOW_URL;
+  const limit = marketId === "nasdaq100" ? 100 : 30;
+  const pageCount = Math.ceil(limit / 50);
+  const pages = await Promise.all(
+    Array.from({ length: pageCount }, async (_, index) => {
+      if (index === 0) {
+        return fetchHtml(url);
+      }
+      const pageUrl = `${url}?page=${index + 1}`;
+      return fetchHtml(pageUrl);
+    }),
+  );
+  const rows = pages
+    .flatMap((html) => parseMarketCapCompanyRows(html, 1000))
+    .filter(
+      (item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index,
+    )
+    .sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0))
+    .slice(0, limit)
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+    }));
+
+  if (rows.length < limit) {
+    throw new Error(`Expected ${limit} ${marketId} market-cap rows, received ${rows.length}`);
+  }
+
+  return rows;
 }
 
 async function fetchNasdaq100Constituents() {
@@ -453,8 +605,7 @@ async function enrichUsMarket(contributors, marketId) {
 
 async function getUsMarket(marketId, forceRefresh = false) {
   return getCachedMarket(marketId, forceRefresh, async () => {
-    const constituents =
-      marketId === "nasdaq100" ? await fetchNasdaq100Constituents() : await fetchDowConstituents();
+    const constituents = await fetchUsMarketCapRanking(marketId);
     const items = await enrichUsMarket(constituents, marketId);
     const config = markets[marketId];
 
@@ -462,7 +613,13 @@ async function getUsMarket(marketId, forceRefresh = false) {
       ...config,
       market: config.label,
       count: items.length,
-      items,
+      items: items
+        .sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0))
+        .map((item, index) => ({
+          ...item,
+          rank: index + 1,
+          marketCapText: item.marketCapText || formatUsdMarketCap(item.marketCap),
+        })),
     };
   });
 }
@@ -501,6 +658,10 @@ async function getCachedMarket(marketId, forceRefresh, fetcher) {
 async function getMarketPayload(marketId, forceRefresh = false) {
   if (marketId === "kospi") {
     return getKospiTop100(forceRefresh);
+  }
+
+  if (marketId === "kosdaq") {
+    return getKosdaqTop50(forceRefresh);
   }
 
   if (marketId === "nasdaq100" || marketId === "dow") {
