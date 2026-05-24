@@ -68,7 +68,7 @@ async function handleStatic(req, res, url) {
     const contentType = mimeTypes[ext] || "application/octet-stream";
     res.writeHead(200, {
       "Content-Type": contentType,
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "no-store",
     });
     res.end(file);
   } catch {
