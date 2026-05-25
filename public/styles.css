@@ -367,7 +367,7 @@ select:focus,
 .chart-price { height: 420px; }
 .chart-volume { height: 180px; }
 .chart-macd { height: 220px; }
-.chart-ichimoku { height: 240px; }
+.chart-ichimoku { height: 384px; }
 
 table {
   width: 100%;

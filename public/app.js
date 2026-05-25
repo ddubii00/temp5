@@ -533,7 +533,7 @@ function drawMacdBackground(container, chart, items) {
   });
 }
 
-function drawIchimokuCloud(container, chart, ichiSource, ichi, visible = true) {
+function drawIchimokuCloud(container, chart, senkouASeries, senkouBSeries, ichiSource, ichi, visible = true) {
   const existing = container.querySelector(".ichi-cloud-overlay");
   if (existing) existing.remove();
   if (!visible) return { setVisible: () => {} };
@@ -563,8 +563,8 @@ function drawIchimokuCloud(container, chart, ichiSource, ichi, visible = true) {
         const b = ichi[i]?.senkouB;
         if (!Number.isFinite(a) || !Number.isFinite(b) || !cond(a, b)) continue;
         const x = chart.timeScale().timeToCoordinate(ichiSource[i].time);
-        const yA = chart.priceScale("right").priceToCoordinate(a);
-        const yB = chart.priceScale("right").priceToCoordinate(b);
+        const yA = senkouASeries.priceToCoordinate(a);
+        const yB = senkouBSeries.priceToCoordinate(b);
         if (x === null || yA === null || yB === null) continue;
         tops.push([x, Math.min(yA, yB)]);
         bottoms.push([x, Math.max(yA, yB)]);
@@ -818,7 +818,15 @@ function renderCharts(payload, ichimokuPayload) {
   const chikouSeries = addSeries(ichimokuChart, "#111827", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.chikou ?? null })));
   const senkouASeries = addSeries(ichimokuChart, "#fb7185", senkouAData);
   const senkouBSeries = addSeries(ichimokuChart, "#3b82f6", senkouBData);
-  const cloudOverlay = drawIchimokuCloud(els.ichimokuChart, ichimokuChart, ichiSource, ichi, true);
+  const cloudOverlay = drawIchimokuCloud(
+    els.ichimokuChart,
+    ichimokuChart,
+    senkouASeries,
+    senkouBSeries,
+    ichiSource,
+    ichi,
+    true,
+  );
 
   const closeByTime = new Map(payload.items.map((x) => [x.time, x.close]));
   const volumeByTime = new Map(payload.items.map((x) => [x.time, x.volume || 0]));
