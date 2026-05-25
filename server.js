@@ -16,6 +16,7 @@ const mimeTypes = {
 };
 
 let krxSearchCache = { loadedAt: 0, items: [] };
+let usOhlcvCache = new Map();
 
 function send(res, statusCode, body, contentType = "text/plain; charset=utf-8") {
   res.writeHead(statusCode, {
@@ -151,36 +152,147 @@ async function fetchKoreanOhlcv(code, days) {
 
 async function fetchUsOhlcv(code, days) {
   const symbol = code.toUpperCase();
-  const response = await fetch(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+  const cacheKey = `${symbol}:${days}`;
+  const now = Date.now();
+  const cached = usOhlcvCache.get(cacheKey);
+  if (cached && now - cached.loadedAt < 1000 * 60 * 5) {
+    return cached.rows;
+  }
+
+  const endpoints = [
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d`,
+  ];
+  let lastError = null;
+  for (const endpoint of endpoints) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await fetch(endpoint, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      });
+      if (response.status === 429) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        lastError = new Error(`Yahoo chart responded with 429`);
+        continue;
+      }
+      if (!response.ok) {
+        lastError = new Error(`Yahoo chart responded with ${response.status}`);
+        break;
+      }
+      const payload = await response.json();
+      const result = payload.chart?.result?.[0];
+      const quote = result?.indicators?.quote?.[0];
+      const stamps = result?.timestamp || [];
+      const rows = stamps
+        .map((stamp, i) => ({
+          date: new Date(stamp * 1000).toISOString().slice(0, 10).replace(/-/g, ""),
+          open: quote?.open?.[i] ?? null,
+          high: quote?.high?.[i] ?? null,
+          low: quote?.low?.[i] ?? null,
+          close: quote?.close?.[i] ?? null,
+          volume: quote?.volume?.[i] ?? null,
+        }))
+        .filter(
+          (x) =>
+            Number.isFinite(x.open) &&
+            Number.isFinite(x.high) &&
+            Number.isFinite(x.low) &&
+            Number.isFinite(x.close),
+        );
+      const sliced = rows.slice(-days);
+      usOhlcvCache.set(cacheKey, { loadedAt: now, rows: sliced });
+      return sliced;
+    }
+  }
+
+  // Fallback #1: Nasdaq chart API
+  const from = new Date(Date.now() - 1000 * 60 * 60 * 24 * Math.max(days + 40, 800))
+    .toISOString()
+    .slice(0, 10);
+  const to = new Date().toISOString().slice(0, 10);
+  const nasdaqResp = await fetch(
+    `https://api.nasdaq.com/api/quote/${encodeURIComponent(
       symbol,
-    )}?range=2y&interval=1d`,
+    )}/chart?assetclass=stocks&fromdate=${from}&todate=${to}&limit=9999`,
     {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
+        Accept: "application/json, text/plain, */*",
+        Origin: "https://www.nasdaq.com",
+        Referer: "https://www.nasdaq.com/",
       },
     },
   );
-  if (!response.ok) {
-    throw new Error(`Yahoo chart responded with ${response.status}`);
+  if (nasdaqResp.ok) {
+    const nj = await nasdaqResp.json();
+    const rows = (nj?.data?.chart || [])
+      .map((p) => ({
+        date: new Date(p.x).toISOString().slice(0, 10).replace(/-/g, ""),
+        open: parseNumeric(p?.z?.open),
+        high: parseNumeric(p?.z?.high),
+        low: parseNumeric(p?.z?.low),
+        close: parseNumeric(p?.z?.close),
+        volume: parseNumeric(p?.z?.volume),
+      }))
+      .filter(
+        (x) =>
+          /^\d{8}$/.test(x.date) &&
+          Number.isFinite(x.open) &&
+          Number.isFinite(x.high) &&
+          Number.isFinite(x.low) &&
+          Number.isFinite(x.close),
+      );
+    if (rows.length) {
+      const sliced = rows.slice(-days);
+      usOhlcvCache.set(cacheKey, { loadedAt: now, rows: sliced });
+      return sliced;
+    }
   }
-  const payload = await response.json();
-  const result = payload.chart?.result?.[0];
-  const quote = result?.indicators?.quote?.[0];
-  const stamps = result?.timestamp || [];
-  const rows = stamps
-    .map((stamp, i) => ({
-      date: new Date(stamp * 1000).toISOString().slice(0, 10).replace(/-/g, ""),
-      open: quote?.open?.[i] ?? null,
-      high: quote?.high?.[i] ?? null,
-      low: quote?.low?.[i] ?? null,
-      close: quote?.close?.[i] ?? null,
-      volume: quote?.volume?.[i] ?? null,
+
+  // Fallback #2: Stooq daily CSV
+  const stooqSymbol = `${symbol.replace(/\./g, "-").toLowerCase()}.us`;
+  const stooqResponse = await fetch(
+    `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSymbol)}&i=d`,
+    {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      },
+    },
+  );
+  if (!stooqResponse.ok) {
+    throw lastError || new Error(`Yahoo chart responded with 429`);
+  }
+  const csv = await stooqResponse.text();
+  const lines = csv.trim().split(/\r?\n/).slice(1);
+  const rows = lines
+    .map((line) => line.split(","))
+    .map((parts) => ({
+      date: (parts[0] || "").replace(/-/g, ""),
+      open: parseNumeric(parts[1]),
+      high: parseNumeric(parts[2]),
+      low: parseNumeric(parts[3]),
+      close: parseNumeric(parts[4]),
+      volume: parseNumeric(parts[5]),
     }))
-    .filter((x) => Number.isFinite(x.open) && Number.isFinite(x.high) && Number.isFinite(x.low) && Number.isFinite(x.close));
-  return rows.slice(-days);
+    .filter(
+      (x) =>
+        /^\d{8}$/.test(x.date) &&
+        Number.isFinite(x.open) &&
+        Number.isFinite(x.high) &&
+        Number.isFinite(x.low) &&
+        Number.isFinite(x.close),
+    );
+  if (!rows.length) {
+    throw lastError || new Error(`Yahoo chart responded with 429`);
+  }
+  const sliced = rows.slice(-days);
+  usOhlcvCache.set(cacheKey, { loadedAt: now, rows: sliced });
+  return sliced;
 }
 
 function toTime(dateYYYYMMDD) {
