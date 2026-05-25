@@ -405,13 +405,21 @@ function closeChartModal() {
   els.chartModal.setAttribute("aria-hidden", "true");
 }
 
-function syncCrosshair(sourceChart, targetCharts) {
+function syncCrosshair(sourceChart, targetDefs) {
   sourceChart.subscribeCrosshairMove((param) => {
-    if (!param || !param.time || !param.point) return;
-    for (const chart of targetCharts) {
-      chart.timeScale().setVisibleRange(sourceChart.timeScale().getVisibleRange());
-      if (typeof chart.setCrosshairPosition === "function" && param.point) {
-        chart.setCrosshairPosition(param.point.x, param.point.y);
+    if (!param || !param.time) {
+      for (const target of targetDefs) {
+        if (typeof target.chart.clearCrosshairPosition === "function") {
+          target.chart.clearCrosshairPosition();
+        }
+      }
+      return;
+    }
+    for (const target of targetDefs) {
+      const value = target.valueByTime.get(param.time);
+      if (!Number.isFinite(value)) continue;
+      if (typeof target.chart.setCrosshairPosition === "function") {
+        target.chart.setCrosshairPosition(value, param.time, target.series);
       }
     }
   });
@@ -552,11 +560,32 @@ function computeIchimoku(items) {
   // 선행1/선행2: 26기간 앞(미래 시점)으로 이동
   for (let i = 0; i < items.length; i += 1) {
     const target = i + 26;
-    if (target >= items.length) break;
     const tenkan = out[i].tenkan;
     const kijun = out[i].kijun;
-    out[target].senkouA = tenkan !== null && kijun !== null ? (tenkan + kijun) / 2 : null;
-    out[target].senkouB = mid(i, 52);
+    if (target < items.length) {
+      out[target].senkouA = tenkan !== null && kijun !== null ? (tenkan + kijun) / 2 : null;
+      out[target].senkouB = mid(i, 52);
+    }
+  }
+  return out;
+}
+
+function addFuturePeriods(lastTime, periods, timeframe) {
+  const [y, m, d] = String(lastTime).split("-").map(Number);
+  const out = [];
+  let dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  for (let i = 0; i < periods; i += 1) {
+    if (timeframe === "month") {
+      dt = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 1));
+    } else if (timeframe === "week") {
+      dt = new Date(dt.getTime() + 7 * 24 * 60 * 60 * 1000);
+    } else {
+      // day: trading-day style approximation (skip weekends)
+      do {
+        dt = new Date(dt.getTime() + 24 * 60 * 60 * 1000);
+      } while (dt.getUTCDay() === 0 || dt.getUTCDay() === 6);
+    }
+    out.push(dt.toISOString().slice(0, 10));
   }
   return out;
 }
@@ -696,16 +725,63 @@ function renderCharts(payload, ichimokuPayload) {
   );
   const ichiFull = computeIchimoku(ichiAll);
   const ichi = ichiFull.slice(start);
+  const futureTimes = ichiSource.length
+    ? addFuturePeriods(ichiSource[ichiSource.length - 1].time, 26, state.ichimokuTimeframe)
+    : [];
+
+  // Build forward-projected senkou series up to +26 periods.
+  const senkouAData = ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.senkouA ?? null }));
+  const senkouBData = ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.senkouB ?? null }));
+  for (let i = 0; i < futureTimes.length; i += 1) {
+    const base = ichiSource.length - 26 + i;
+    if (base < 0 || base >= ichiSource.length) {
+      senkouAData.push({ time: futureTimes[i], value: null });
+      senkouBData.push({ time: futureTimes[i], value: null });
+      continue;
+    }
+    const t = ichi[base]?.tenkan ?? null;
+    const k = ichi[base]?.kijun ?? null;
+    senkouAData.push({ time: futureTimes[i], value: t !== null && k !== null ? (t + k) / 2 : null });
+
+    if (base < 52 - 1) {
+      senkouBData.push({ time: futureTimes[i], value: null });
+    } else {
+      let hi = -Infinity;
+      let lo = Infinity;
+      for (let j = base - 52 + 1; j <= base; j += 1) {
+        hi = Math.max(hi, ichiSource[j].high);
+        lo = Math.min(lo, ichiSource[j].low);
+      }
+      senkouBData.push({ time: futureTimes[i], value: (hi + lo) / 2 });
+    }
+  }
   const tenkanSeries = addSeries(ichimokuChart, "#9ca3af", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.tenkan ?? null })));
   const kijunSeries = addSeries(ichimokuChart, "#22c1dd", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.kijun ?? null })));
   const chikouSeries = addSeries(ichimokuChart, "#111827", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.chikou ?? null })));
-  const senkouASeries = addSeries(ichimokuChart, "#fb7185", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.senkouA ?? null })));
-  const senkouBSeries = addSeries(ichimokuChart, "#3b82f6", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.senkouB ?? null })));
+  const senkouASeries = addSeries(ichimokuChart, "#fb7185", senkouAData);
+  const senkouBSeries = addSeries(ichimokuChart, "#3b82f6", senkouBData);
   const cloudOverlay = drawIchimokuCloud(els.ichimokuChart, ichimokuChart, ichiSource, ichi, true);
 
-  syncCrosshair(priceChart, [volumeChart, macdChart]);
-  syncCrosshair(volumeChart, [priceChart, macdChart]);
-  syncCrosshair(macdChart, [priceChart, volumeChart]);
+  const closeByTime = new Map(payload.items.map((x) => [x.time, x.close]));
+  const volumeByTime = new Map(payload.items.map((x) => [x.time, x.volume || 0]));
+  const macdByTime = new Map(
+    payload.items
+      .filter((x) => Number.isFinite(x.macd))
+      .map((x) => [x.time, x.macd]),
+  );
+
+  syncCrosshair(priceChart, [
+    { chart: volumeChart, series: vol, valueByTime: volumeByTime },
+    { chart: macdChart, series: macdLine, valueByTime: macdByTime },
+  ]);
+  syncCrosshair(volumeChart, [
+    { chart: priceChart, series: candles, valueByTime: closeByTime },
+    { chart: macdChart, series: macdLine, valueByTime: macdByTime },
+  ]);
+  syncCrosshair(macdChart, [
+    { chart: priceChart, series: candles, valueByTime: closeByTime },
+    { chart: volumeChart, series: vol, valueByTime: volumeByTime },
+  ]);
   syncTimeScales([priceChart, volumeChart, macdChart]);
   const baseRange = priceChart.timeScale().getVisibleLogicalRange();
   if (baseRange) {
@@ -725,13 +801,11 @@ function renderCharts(payload, ichimokuPayload) {
   ]);
   try {
     makeLegend(els.ichimokuLegend, [
-      { label: "캔들", color: "#475569", series: ichiCandles, visible: true },
-      { label: "전환선", color: "#9ca3af", series: tenkanSeries, visible: true },
       { label: "기준선", color: "#22c1dd", series: kijunSeries, visible: true },
+      { label: "전환선", color: "#9ca3af", series: tenkanSeries, visible: true },
       { label: "후행선", color: "#111827", series: chikouSeries, visible: true },
       { label: "선행1", color: "#fb7185", series: senkouASeries, visible: true },
       { label: "선행2", color: "#3b82f6", series: senkouBSeries, visible: true },
-      { label: "양운/음운", color: "#ef4444", series: { applyOptions: ({ visible }) => cloudOverlay.setVisible(visible !== false) }, visible: true },
     ]);
   } catch {
     // Keep price legend available even if ichimoku legend fails.
