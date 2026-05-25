@@ -15,6 +15,8 @@ const mimeTypes = {
   ".ico": "image/x-icon",
 };
 
+let krxSearchCache = { loadedAt: 0, items: [] };
+
 function send(res, statusCode, body, contentType = "text/plain; charset=utf-8") {
   res.writeHead(statusCode, {
     "Content-Type": contentType,
@@ -25,6 +27,72 @@ function send(res, statusCode, body, contentType = "text/plain; charset=utf-8") 
 
 function sendJson(res, statusCode, payload) {
   send(res, statusCode, JSON.stringify(payload), "application/json; charset=utf-8");
+}
+
+function decodeEucKr(buffer) {
+  try {
+    return new TextDecoder("euc-kr").decode(buffer);
+  } catch {
+    return new TextDecoder("utf-8").decode(buffer);
+  }
+}
+
+async function loadKrxSearchList() {
+  const now = Date.now();
+  if (now - krxSearchCache.loadedAt < 1000 * 60 * 60 * 6 && krxSearchCache.items.length) {
+    return krxSearchCache.items;
+  }
+  const response = await fetch(
+    "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13",
+    {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+      },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`KRX list responded with ${response.status}`);
+  }
+  const html = decodeEucKr(new Uint8Array(await response.arrayBuffer()));
+  const rows = [...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)];
+  const items = [];
+  for (const row of rows) {
+    const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
+      m[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim(),
+    );
+    if (cells.length < 3) continue;
+    const name = cells[0];
+    const marketType = String(cells[1] || "").trim();
+    const rawCode = String(cells[2] || "").trim();
+    const digits = rawCode.replace(/\D/g, "");
+    if (!name || digits.length !== 6) continue;
+    const code = digits;
+    items.push({ name, code, marketType });
+  }
+  krxSearchCache = { loadedAt: now, items };
+  return items;
+}
+
+async function searchSymbols(marketId, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const isKorean = marketId === "kospi" || marketId === "kosdaq";
+  if (isKorean) {
+    const list = await loadKrxSearchList();
+    return list
+      .filter((x) =>
+        marketId === "kospi" ? x.marketType === "유가" : marketId === "kosdaq" ? x.marketType === "코스닥" : true,
+      )
+      .filter((x) => x.name.toLowerCase().includes(q) || x.code.includes(q))
+      .slice(0, 20);
+  }
+  const payload = await getMarketPayload(marketId);
+  return payload.items
+    .filter((x) => x.name.toLowerCase().includes(q) || x.code.toLowerCase().includes(q))
+    .slice(0, 20)
+    .map((x) => ({ name: x.name, code: x.code }));
 }
 
 function parseNumeric(text) {
@@ -203,6 +271,18 @@ function buildIndicators(rows) {
 async function handleApi(req, res, url) {
   if (url.pathname === "/api/markets") {
     sendJson(res, 200, { markets: getMarkets() });
+    return;
+  }
+
+  if (url.pathname === "/api/search") {
+    try {
+      const marketId = (url.searchParams.get("market") || "kospi").toLowerCase();
+      const q = url.searchParams.get("q") || "";
+      const items = await searchSymbols(marketId, q);
+      sendJson(res, 200, { market: marketId, q, items });
+    } catch (error) {
+      sendJson(res, 502, { error: "종목 검색에 실패했습니다.", detail: error.message });
+    }
     return;
   }
 

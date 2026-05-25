@@ -20,12 +20,13 @@ const state = {
   market: "kospi",
   selectedCode: "",
   selectedName: "",
-  chartDays: 120,
+  chartDays: 200,
   chartFetchDays: 700,
   chartTimeframe: "day",
-  ichimokuDays: 120,
+  ichimokuDays: 200,
   ichimokuTimeframe: "day",
   loading: false,
+  searchSuggestions: [],
 };
 
 const marketLabels = {
@@ -49,6 +50,8 @@ const els = {
   refreshButton: document.querySelector("#refreshButton"),
   rows: document.querySelector("#stockRows"),
   searchInput: document.querySelector("#searchInput"),
+  searchSuggestions: document.querySelector("#searchSuggestions"),
+  searchSuggestionMenu: document.querySelector("#searchSuggestionMenu"),
   sortSelect: document.querySelector("#sortSelect"),
   sourceLabel: document.querySelector("#sourceLabel"),
   totalMarketCap: document.querySelector("#totalMarketCap"),
@@ -80,6 +83,7 @@ const rateFormatter = new Intl.NumberFormat("ko-KR", {
 });
 let requestSerial = 0;
 let chartRuntime = null;
+let searchTimer = null;
 
 function makeLegend(container, items) {
   container.innerHTML = "";
@@ -101,6 +105,64 @@ function makeLegend(container, items) {
     });
     container.appendChild(btn);
   });
+}
+
+function renderSearchSuggestions(items) {
+  state.searchSuggestions = items;
+  els.searchSuggestions.innerHTML = items
+    .map((x) => `<option value="${escapeHtml(`${x.name} (${x.code})`)}"></option>`)
+    .join("");
+  if (!items.length) {
+    els.searchSuggestionMenu.style.display = "none";
+    els.searchSuggestionMenu.innerHTML = "";
+    return;
+  }
+  els.searchSuggestionMenu.innerHTML = items
+    .map(
+      (x) =>
+        `<button type="button" class="search-suggestion-item" data-code="${escapeHtml(
+          x.code,
+        )}" data-name="${escapeHtml(x.name)}">${escapeHtml(x.name)} (${escapeHtml(x.code)})</button>`,
+    )
+    .join("");
+  els.searchSuggestionMenu.style.display = "block";
+  els.searchSuggestionMenu.querySelectorAll(".search-suggestion-item").forEach((button) => {
+    button.addEventListener("mousedown", async (event) => {
+      event.preventDefault();
+      const code = button.dataset.code || "";
+      const name = button.dataset.name || "";
+      els.searchInput.value = `${name} (${code})`;
+      els.searchSuggestionMenu.style.display = "none";
+      try {
+        await openChartByCode(code, name);
+      } catch (error) {
+        state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+        render();
+      }
+    });
+  });
+}
+
+async function loadSearchSuggestions(query) {
+  if (!query || query.trim().length < 1) {
+    renderSearchSuggestions([]);
+    return;
+  }
+  try {
+    const params = new URLSearchParams({ market: state.market, q: query.trim() });
+    const response = await fetch(`/api/search?${params.toString()}`);
+    const payload = await response.json();
+    if (!response.ok) return;
+    renderSearchSuggestions(payload.items || []);
+  } catch {
+    renderSearchSuggestions([]);
+  }
+}
+
+async function openChartByCode(code, name) {
+  state.selectedCode = code;
+  state.selectedName = name || code;
+  await loadChartData();
 }
 
 function escapeHtml(value) {
@@ -818,6 +880,8 @@ function renderCharts(payload, ichimokuPayload) {
   const chikouSeries = addSeries(ichimokuChart, "#111827", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.chikou ?? null })));
   const senkouASeries = addSeries(ichimokuChart, "#fb7185", senkouAData);
   const senkouBSeries = addSeries(ichimokuChart, "#3b82f6", senkouBData);
+  senkouASeries.applyOptions({ lineWidth: 4 });
+  senkouBSeries.applyOptions({ lineWidth: 4 });
   const cloudOverlay = drawIchimokuCloud(
     els.ichimokuChart,
     ichimokuChart,
@@ -959,10 +1023,8 @@ function render() {
   els.rows.querySelectorAll(".stock-link").forEach((link) => {
     link.addEventListener("click", async (event) => {
       event.preventDefault();
-      state.selectedCode = link.dataset.code || "";
-      state.selectedName = link.dataset.name || "";
       try {
-        await loadChartData();
+        await openChartByCode(link.dataset.code || "", link.dataset.name || "");
       } catch (error) {
         state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
         render();
@@ -1023,8 +1085,52 @@ async function loadStocks(forceRefresh = false) {
 }
 
 els.searchInput.addEventListener("input", (event) => {
-  state.query = event.target.value;
+  const value = event.target.value;
+  state.query = value;
   render();
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    loadSearchSuggestions(value);
+  }, 180);
+});
+
+els.searchInput.addEventListener("change", async () => {
+  const value = els.searchInput.value.trim();
+  const codeMatch = value.match(/\(([^)]+)\)\s*$/);
+  if (!codeMatch) return;
+  const code = codeMatch[1].trim().toUpperCase();
+  const picked = state.searchSuggestions.find((x) => x.code.toUpperCase() === code);
+  if (!picked) return;
+  els.searchSuggestionMenu.style.display = "none";
+  try {
+    await openChartByCode(picked.code, picked.name);
+  } catch (error) {
+    state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+    render();
+  }
+});
+
+els.searchInput.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") return;
+  const value = els.searchInput.value.trim();
+  const codeMatch = value.match(/\(([^)]+)\)\s*$/);
+  if (!codeMatch) return;
+  event.preventDefault();
+  const code = codeMatch[1].trim().toUpperCase();
+  const picked = state.searchSuggestions.find((x) => x.code.toUpperCase() === code);
+  if (!picked) return;
+  try {
+    await openChartByCode(picked.code, picked.name);
+  } catch (error) {
+    state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+    render();
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!els.searchSuggestionMenu) return;
+  if (els.searchSuggestionMenu.contains(event.target) || els.searchInput.contains(event.target)) return;
+  els.searchSuggestionMenu.style.display = "none";
 });
 
 els.directionFilter.addEventListener("change", (event) => {
@@ -1042,7 +1148,7 @@ els.refreshButton.addEventListener("click", () => {
 });
 
 els.applyDaysButton.addEventListener("click", async () => {
-  const days = Number(els.daysInput.value || 120);
+  const days = Number(els.daysInput.value || 200);
   state.chartDays = Math.max(30, Math.min(1200, days));
   state.chartFetchDays = Math.max(state.chartDays + 100, 700); // 충분한 히스토리 확보
   els.daysInput.value = String(state.chartDays);
@@ -1081,7 +1187,7 @@ els.ichimokuPeriodButtons.forEach((button) => {
 });
 
 els.applyIchimokuDaysButton.addEventListener("click", async () => {
-  const days = Number(els.ichimokuDaysInput.value || 120);
+  const days = Number(els.ichimokuDaysInput.value || 200);
   state.ichimokuDays = Math.max(30, Math.min(1200, days));
   els.ichimokuDaysInput.value = String(state.ichimokuDays);
   try {
@@ -1107,6 +1213,7 @@ els.marketButtons.forEach((button) => {
     state.direction = "all";
     state.sort = "rank";
     els.searchInput.value = "";
+    renderSearchSuggestions([]);
     els.directionFilter.value = "all";
     loadStocks();
   });

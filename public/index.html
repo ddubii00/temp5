@@ -6,7 +6,7 @@
     <title>Market Top Boards</title>
     <link rel="stylesheet" href="/styles.css?v=20260525e" />
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/app.js?v=20260525r" defer></script>
+    <script src="/app.js?v=20260525u" defer></script>
   </head>
   <body>
     <header class="app-header">
@@ -72,7 +72,9 @@
       <section class="controls" aria-label="목록 제어">
         <label class="search-box">
           <span>검색</span>
-          <input id="searchInput" type="search" placeholder="종목명 또는 코드" />
+          <input id="searchInput" type="search" placeholder="종목명 또는 코드" list="searchSuggestions" />
+          <datalist id="searchSuggestions"></datalist>
+          <div id="searchSuggestionMenu" class="search-suggestion-menu"></div>
         </label>
         <label>
           <span>등락</span>
@@ -131,7 +133,7 @@
             </div>
             <label>
               <span>조회 기간</span>
-              <input id="daysInput" type="number" min="30" max="1200" step="10" value="120" />
+              <input id="daysInput" type="number" min="30" max="1200" step="10" value="200" />
             </label>
             <button type="button" id="applyDaysButton">적용</button>
             <button type="button" id="closeChartButton">닫기</button>
@@ -149,7 +151,7 @@
               </div>
               <label>
                 <span>일목 조회 기간</span>
-                <input id="ichimokuDaysInput" type="number" min="30" max="1200" step="10" value="120" />
+                <input id="ichimokuDaysInput" type="number" min="30" max="1200" step="10" value="200" />
               </label>
               <button type="button" id="applyIchimokuDaysButton">적용</button>
             </div>

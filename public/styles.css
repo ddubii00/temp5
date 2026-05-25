@@ -199,6 +199,9 @@ main {
   gap: 14px;
   margin-top: 14px;
   padding: 16px;
+  overflow: visible;
+  position: relative;
+  z-index: 5;
 }
 
 .controls label {
@@ -368,6 +371,40 @@ select:focus,
 .chart-volume { height: 180px; }
 .chart-macd { height: 220px; }
 .chart-ichimoku { height: 384px; }
+
+.search-box {
+  position: relative;
+}
+
+.search-suggestion-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  z-index: 40;
+  max-height: 240px;
+  overflow-y: auto;
+  display: none;
+}
+
+.search-suggestion-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 0.94rem;
+  color: #1e293b;
+}
+
+.search-suggestion-item:hover {
+  background: #f8fafc;
+}
 
 table {
   width: 100%;
