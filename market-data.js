@@ -6,8 +6,10 @@ const MARKETCAP_NASDAQ_100_URL =
 const MARKETCAP_DOW_URL =
   "https://marketcap.company/stock-indices/dow-jones-industrial-average-index-market-cap/";
 const STOOQ_QUOTE_URL = "https://stooq.com/q/l/";
+const NAVER_ITEM_MAIN_URL = "https://finance.naver.com/item/main.naver?code=";
 const CACHE_TTL_MS = 45_000;
 const US_QUOTE_CONCURRENCY = 4;
+const KOR_FUNDAMENTAL_CONCURRENCY = 8;
 
 const cache = new Map();
 const inflightFetches = new Map();
@@ -164,6 +166,23 @@ function parseUsdMarketCap(text) {
   return value;
 }
 
+function parseNaverFundamentalRowValue(html, rowTitle) {
+  const rowRegex = new RegExp(
+    `<tr[^>]*>\\s*<th[^>]*>\\s*<strong>${rowTitle}<\\/strong>[\\s\\S]*?<\\/tr>`,
+    "i",
+  );
+  const rowMatch = html.match(rowRegex);
+  if (!rowMatch) {
+    return null;
+  }
+
+  const cellTexts = [...rowMatch[0].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)]
+    .map((match) => cleanText(match[1]))
+    .filter((text) => text && text !== "&nbsp;");
+  const latest = cellTexts[cellTexts.length - 1];
+  return parseNumeric(latest);
+}
+
 function signedText(value, formatter = (number) => String(number)) {
   if (!Number.isFinite(value)) {
     return "";
@@ -240,6 +259,7 @@ function parseMarketCapPage(html) {
       volumeText: numberCells[7] || "",
       per: parseNumeric(numberCells[8]),
       roe: parseNumeric(numberCells[9]),
+      sales: null,
       operatingProfit: null,
       pbr: null,
       detailUrl: `https://finance.naver.com/item/main.naver?code=${code}`,
@@ -290,12 +310,47 @@ async function getKoreanMarket(marketId, sosok, count, forceRefresh = false) {
     if (items.length < count) {
       throw new Error(`Expected ${count} rows, received ${items.length}`);
     }
+    const enrichedItems = await mapWithLimit(
+      items,
+      KOR_FUNDAMENTAL_CONCURRENCY,
+      async (item) => {
+        try {
+          const response = await fetch(`${NAVER_ITEM_MAIN_URL}${item.code}`, {
+            headers: {
+              "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+              "User-Agent":
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            },
+          });
+
+          if (!response.ok) {
+            return item;
+          }
+
+          const html = await response.text();
+          const pbr = parseNaverFundamentalRowValue(html, "PBR\\(배\\)");
+          const sales = parseNaverFundamentalRowValue(html, "매출액");
+          const operatingProfit = parseNaverFundamentalRowValue(html, "영업이익");
+          return {
+            ...item,
+            pbr: Number.isFinite(pbr) ? pbr : item.pbr,
+            sales: Number.isFinite(sales) ? sales : item.sales,
+            operatingProfit: Number.isFinite(operatingProfit)
+              ? operatingProfit
+              : item.operatingProfit,
+          };
+        } catch {
+          return item;
+        }
+      },
+    );
+
     const config = markets[marketId];
     return {
       ...config,
       market: config.label,
-      count: items.length,
-      items,
+      count: enrichedItems.length,
+      items: enrichedItems,
     };
   });
 }
@@ -557,6 +612,7 @@ async function fetchStooqQuoteOnce(symbol) {
       : "",
     per: null,
     roe: null,
+    sales: null,
     operatingProfit: null,
     pbr: null,
     currency: "USD",
@@ -597,6 +653,7 @@ async function enrichUsMarket(contributors, marketId) {
         volumeText: "",
         per: item.per ?? null,
         roe: item.roe ?? null,
+        sales: item.sales ?? null,
         operatingProfit: item.operatingProfit ?? null,
         pbr: item.pbr ?? null,
         currency: "USD",

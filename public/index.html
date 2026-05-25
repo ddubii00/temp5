@@ -4,8 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Market Top Boards</title>
-    <link rel="stylesheet" href="/styles.css?v=20260525b" />
-    <script src="/app.js?v=20260525b" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260525e" />
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="/app.js?v=20260525o" defer></script>
   </head>
   <body>
     <header class="app-header">
@@ -106,6 +107,7 @@
               <th class="numeric">등락률</th>
               <th class="numeric">전일비</th>
               <th class="numeric" id="extraHeader">시가총액(조)</th>
+              <th class="numeric">매출(조)</th>
               <th class="numeric">영업이익(조)</th>
               <th class="numeric">PER</th>
               <th class="numeric">ROE</th>
@@ -115,6 +117,46 @@
           </thead>
           <tbody id="stockRows"></tbody>
         </table>
+      </section>
+
+      <section class="chart-modal" id="chartModal" aria-hidden="true">
+        <div class="chart-modal-backdrop" id="chartBackdrop"></div>
+        <div class="chart-modal-content">
+          <header class="chart-header">
+            <strong id="chartTitle">차트</strong>
+            <div class="period-buttons">
+              <button type="button" class="period-btn is-active" data-timeframe="day">일봉</button>
+              <button type="button" class="period-btn" data-timeframe="week">주봉</button>
+              <button type="button" class="period-btn" data-timeframe="month">월봉</button>
+            </div>
+            <label>
+              <span>조회 기간</span>
+              <input id="daysInput" type="number" min="30" max="1200" step="10" value="120" />
+            </label>
+            <button type="button" id="applyDaysButton">적용</button>
+            <button type="button" id="closeChartButton">닫기</button>
+          </header>
+          <div class="chart-stack">
+            <div id="priceLegend" class="chart-legend"></div>
+            <div id="priceChart" class="chart-box chart-price"></div>
+            <div id="volumeChart" class="chart-box chart-volume"></div>
+            <div id="macdChart" class="chart-box chart-macd"></div>
+            <div class="chart-subheader">
+              <div class="period-buttons" id="ichimokuPeriodButtons">
+                <button type="button" class="period-btn is-active" data-ichi-timeframe="day">일봉</button>
+                <button type="button" class="period-btn" data-ichi-timeframe="week">주봉</button>
+                <button type="button" class="period-btn" data-ichi-timeframe="month">월봉</button>
+              </div>
+              <label>
+                <span>일목 조회 기간</span>
+                <input id="ichimokuDaysInput" type="number" min="30" max="1200" step="10" value="120" />
+              </label>
+              <button type="button" id="applyIchimokuDaysButton">적용</button>
+            </div>
+            <div id="ichimokuLegend" class="chart-legend"></div>
+            <div id="ichimokuChart" class="chart-box chart-ichimoku"></div>
+          </div>
+        </div>
       </section>
     </main>
   </body>

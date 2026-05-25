@@ -18,6 +18,13 @@ const state = {
   error: "",
   sort: "rank",
   market: "kospi",
+  selectedCode: "",
+  selectedName: "",
+  chartDays: 120,
+  chartFetchDays: 700,
+  chartTimeframe: "day",
+  ichimokuDays: 120,
+  ichimokuTimeframe: "day",
   loading: false,
 };
 
@@ -48,6 +55,22 @@ const els = {
   updatedAt: document.querySelector("#updatedAt"),
   upCount: document.querySelector("#upCount"),
   visibleCount: document.querySelector("#visibleCount"),
+  chartTitle: document.querySelector("#chartTitle"),
+  daysInput: document.querySelector("#daysInput"),
+  applyDaysButton: document.querySelector("#applyDaysButton"),
+  ichimokuDaysInput: document.querySelector("#ichimokuDaysInput"),
+  applyIchimokuDaysButton: document.querySelector("#applyIchimokuDaysButton"),
+  priceChart: document.querySelector("#priceChart"),
+  volumeChart: document.querySelector("#volumeChart"),
+  macdChart: document.querySelector("#macdChart"),
+  ichimokuChart: document.querySelector("#ichimokuChart"),
+  priceLegend: document.querySelector("#priceLegend"),
+  ichimokuLegend: document.querySelector("#ichimokuLegend"),
+  chartModal: document.querySelector("#chartModal"),
+  chartBackdrop: document.querySelector("#chartBackdrop"),
+  closeChartButton: document.querySelector("#closeChartButton"),
+  periodButtons: document.querySelectorAll("[data-timeframe]"),
+  ichimokuPeriodButtons: document.querySelectorAll("[data-ichi-timeframe]"),
 };
 
 const numberFormatter = new Intl.NumberFormat("ko-KR");
@@ -56,6 +79,29 @@ const rateFormatter = new Intl.NumberFormat("ko-KR", {
   minimumFractionDigits: 2,
 });
 let requestSerial = 0;
+let chartRuntime = null;
+
+function makeLegend(container, items) {
+  container.innerHTML = "";
+  container.style.display = "flex";
+  container.style.visibility = "visible";
+  container.style.opacity = "1";
+  container.style.position = "relative";
+  container.style.zIndex = "5";
+  items.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "legend-btn";
+    btn.textContent = item.label;
+    btn.style.borderColor = item.color;
+    btn.addEventListener("click", () => {
+      item.visible = !item.visible;
+      item.series.applyOptions({ visible: item.visible });
+      btn.classList.toggle("is-off", !item.visible);
+    });
+    container.appendChild(btn);
+  });
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -118,25 +164,11 @@ function formatPrice(stock) {
 }
 
 function formatChange(stock) {
-  if (stock.changeText) {
-    if (stock.currency === "USD") {
-      const sign = stock.changeText.startsWith("-")
-        ? "-"
-        : stock.changeText.startsWith("+")
-          ? "+"
-          : "";
-      const absolute = stock.changeText.replace(/^[+-]/, "");
-      return `${sign}$${absolute}`;
-    }
-
-    return stock.changeText;
-  }
-
   if (!Number.isFinite(stock.change)) {
     return "-";
   }
 
-  const sign = stock.change > 0 ? "+" : "";
+  const sign = stock.change > 0 ? "+" : stock.change < 0 ? "-" : "";
   if (stock.currency === "USD") {
     return `${sign}$${Math.abs(stock.change).toLocaleString("en-US", {
       maximumFractionDigits: 2,
@@ -144,7 +176,7 @@ function formatChange(stock) {
     })}`;
   }
 
-  return `${sign}${formatNumber(stock.change)}`;
+  return `${sign}${formatNumber(Math.abs(stock.change))}`;
 }
 
 function rateClass(stock) {
@@ -329,7 +361,7 @@ function renderRows(items) {
           <td class="rank">${formatNumber(stock.rank)}</td>
           <td>
             <div class="stock-name">
-              <a href="${escapeHtml(stock.detailUrl)}" target="_blank" rel="noreferrer">
+              <a href="#" data-code="${escapeHtml(stock.code)}" data-name="${escapeHtml(stock.name)}" class="stock-link">
                 ${escapeHtml(stock.name)}
               </a>
               <span class="code">${escapeHtml(stock.code)}</span>
@@ -341,6 +373,7 @@ function renderRows(items) {
           </td>
           <td class="numeric ${movement}">${escapeHtml(formatChange(stock))}</td>
           ${extraCell(stock)}
+          <td class="numeric muted-value">${eokToJo(stock.sales)}</td>
           <td class="numeric muted-value">${eokToJo(stock.operatingProfit)}</td>
           <td class="numeric">${formatPlainNumber(stock.per)}</td>
           <td class="numeric">${Number.isFinite(stock.roe) ? `${formatPlainNumber(stock.roe)}%` : "-"}</td>
@@ -349,6 +382,389 @@ function renderRows(items) {
         </tr>`;
     })
     .join("");
+}
+
+function destroyCharts() {
+  if (!chartRuntime) return;
+  chartRuntime.priceChart.remove();
+  chartRuntime.volumeChart.remove();
+  chartRuntime.macdChart.remove();
+  if (chartRuntime.ichimokuChart) {
+    chartRuntime.ichimokuChart.remove();
+  }
+  chartRuntime = null;
+}
+
+function openChartModal() {
+  els.chartModal.classList.add("is-open");
+  els.chartModal.setAttribute("aria-hidden", "false");
+}
+
+function closeChartModal() {
+  els.chartModal.classList.remove("is-open");
+  els.chartModal.setAttribute("aria-hidden", "true");
+}
+
+function syncCrosshair(sourceChart, targetCharts) {
+  sourceChart.subscribeCrosshairMove((param) => {
+    if (!param || !param.time || !param.point) return;
+    for (const chart of targetCharts) {
+      chart.timeScale().setVisibleRange(sourceChart.timeScale().getVisibleRange());
+      if (typeof chart.setCrosshairPosition === "function" && param.point) {
+        chart.setCrosshairPosition(param.point.x, param.point.y);
+      }
+    }
+  });
+}
+
+function syncTimeScales(charts) {
+  let syncing = false;
+  charts.forEach((source) => {
+    source.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (!range || syncing) return;
+      syncing = true;
+      charts.forEach((target) => {
+        if (target !== source) {
+          target.timeScale().setVisibleLogicalRange(range);
+        }
+      });
+      syncing = false;
+    });
+  });
+}
+
+function addSeries(chart, color, values) {
+  const series = chart.addLineSeries({
+    color,
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+  series.setData(values.filter((x) => Number.isFinite(x.value)));
+  return series;
+}
+
+function buildCloudBands(ichiSource, ichi) {
+  const upBand = [];
+  const downBand = [];
+  for (let i = 0; i < ichiSource.length; i += 1) {
+    const a = ichi[i]?.senkouA ?? null;
+    const b = ichi[i]?.senkouB ?? null;
+    const t = ichiSource[i].time;
+    if (a === null || b === null) {
+      upBand.push({ time: t, value: null, color: "rgba(0,0,0,0)" });
+      downBand.push({ time: t, value: null, color: "rgba(0,0,0,0)" });
+      continue;
+    }
+    const low = Math.min(a, b);
+    const high = Math.max(a, b);
+    if (a > b) {
+      upBand.push({ time: t, value: high, color: "rgba(239,68,68,0.28)" });
+      downBand.push({ time: t, value: low, color: "rgba(239,68,68,0.28)" });
+    } else {
+      upBand.push({ time: t, value: high, color: "rgba(37,99,235,0.26)" });
+      downBand.push({ time: t, value: low, color: "rgba(37,99,235,0.26)" });
+    }
+  }
+  return { upBand, downBand };
+}
+
+function drawIchimokuCloud(container, chart, ichiSource, ichi, visible = true) {
+  const existing = container.querySelector(".ichi-cloud-overlay");
+  if (existing) existing.remove();
+  if (!visible) return { setVisible: () => {} };
+  const canvas = document.createElement("canvas");
+  canvas.className = "ichi-cloud-overlay";
+  canvas.style.position = "absolute";
+  canvas.style.inset = "0";
+  canvas.style.pointerEvents = "none";
+  container.appendChild(canvas);
+  const dpr = window.devicePixelRatio || 1;
+  const paint = () => {
+    const rect = container.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    const drawColor = (cond, color) => {
+      ctx.beginPath();
+      let started = false;
+      const tops = [];
+      const bottoms = [];
+      for (let i = 0; i < ichiSource.length; i += 1) {
+        const a = ichi[i]?.senkouA;
+        const b = ichi[i]?.senkouB;
+        if (!Number.isFinite(a) || !Number.isFinite(b) || !cond(a, b)) continue;
+        const x = chart.timeScale().timeToCoordinate(ichiSource[i].time);
+        const yA = chart.priceScale("right").priceToCoordinate(a);
+        const yB = chart.priceScale("right").priceToCoordinate(b);
+        if (x === null || yA === null || yB === null) continue;
+        tops.push([x, Math.min(yA, yB)]);
+        bottoms.push([x, Math.max(yA, yB)]);
+      }
+      if (tops.length < 2) return;
+      ctx.moveTo(tops[0][0], tops[0][1]);
+      for (const p of tops) ctx.lineTo(p[0], p[1]);
+      for (let i = bottoms.length - 1; i >= 0; i -= 1) ctx.lineTo(bottoms[i][0], bottoms[i][1]);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    drawColor((a, b) => a > b, "rgba(239,68,68,0.22)");
+    drawColor((a, b) => a < b, "rgba(37,99,235,0.20)");
+  };
+  paint();
+  chart.timeScale().subscribeVisibleTimeRangeChange(paint);
+  return {
+    setVisible: (v) => {
+      canvas.style.display = v ? "block" : "none";
+      if (v) paint();
+    },
+  };
+}
+
+function computeIchimoku(items) {
+  const mid = (index, period) => {
+    if (index < period - 1) return null;
+    let hi = -Infinity;
+    let lo = Infinity;
+    for (let i = index - period + 1; i <= index; i += 1) {
+      hi = Math.max(hi, items[i].high);
+      lo = Math.min(lo, items[i].low);
+    }
+    return (hi + lo) / 2;
+  };
+
+  const out = items.map((_, i) => {
+    const tenkan = mid(i, 9);
+    const kijun = mid(i, 26);
+    return { tenkan, kijun, chikou: null, senkouA: null, senkouB: null };
+  });
+  // 후행선(지연스팬): 현재 종가를 26기간 뒤(과거 시점)로 이동
+  for (let i = 0; i < items.length; i += 1) {
+    const target = i - 26;
+    if (target < 0) continue;
+    out[target].chikou = items[i].close;
+  }
+  // 선행1/선행2: 26기간 앞(미래 시점)으로 이동
+  for (let i = 0; i < items.length; i += 1) {
+    const target = i + 26;
+    if (target >= items.length) break;
+    const tenkan = out[i].tenkan;
+    const kijun = out[i].kijun;
+    out[target].senkouA = tenkan !== null && kijun !== null ? (tenkan + kijun) / 2 : null;
+    out[target].senkouB = mid(i, 52);
+  }
+  return out;
+}
+
+function renderCharts(payload, ichimokuPayload) {
+  destroyCharts();
+  const common = {
+    layout: { background: { color: "#fff" }, textColor: "#334155", attributionLogo: false },
+    grid: { vertLines: { color: "#edf2f7" }, horzLines: { color: "#edf2f7" } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScale: false,
+    handleScroll: { pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false, mouseWheel: false },
+    rightPriceScale: { borderColor: "#d0d7de", minimumWidth: 120 },
+    timeScale: {
+      borderColor: "#d0d7de",
+      timeVisible: true,
+      tickMarkFormatter: (time) => {
+        if (typeof time === "number") {
+          const d = new Date(time * 1000);
+          return `${d.getUTCFullYear()}.${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+        }
+        if (time && typeof time === "object" && "year" in time && "month" in time) {
+          return `${time.year}.${String(time.month).padStart(2, "0")}`;
+        }
+        if (typeof time === "string" && time.length >= 7) {
+          return `${time.slice(0, 4)}.${time.slice(5, 7)}`;
+        }
+        return "";
+      },
+    },
+  };
+  const priceChart = LightweightCharts.createChart(els.priceChart, { ...common, height: 420 });
+  const volumeChart = LightweightCharts.createChart(els.volumeChart, { ...common, height: 180 });
+  const macdChart = LightweightCharts.createChart(els.macdChart, { ...common, height: 220 });
+  chartRuntime = { priceChart, volumeChart, macdChart };
+  const ichimokuChart = LightweightCharts.createChart(els.ichimokuChart, { ...common, height: 240 });
+  chartRuntime = { priceChart, volumeChart, macdChart, ichimokuChart };
+
+  const candles = priceChart.addCandlestickSeries({
+    upColor: "#ef4444",
+    downColor: "#2563eb",
+    borderUpColor: "#ef4444",
+    borderDownColor: "#2563eb",
+    wickUpColor: "#ef4444",
+    wickDownColor: "#2563eb",
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  candles.setData(
+    payload.items.map((x) => ({ time: x.time, open: x.open, high: x.high, low: x.low, close: x.close })),
+  );
+
+  const ma5Series = addSeries(priceChart, "#f59e0b", payload.items.map((x) => ({ time: x.time, value: x.ma5 })));
+  const ma10Series = addSeries(priceChart, "#f97316", payload.items.map((x) => ({ time: x.time, value: x.ma10 })));
+  const ma20Series = addSeries(priceChart, "#ec4899", payload.items.map((x) => ({ time: x.time, value: x.ma20 })));
+  const ma60Series = addSeries(priceChart, "#10b981", payload.items.map((x) => ({ time: x.time, value: x.ma60 })));
+  const ma120Series = addSeries(priceChart, "#8b5cf6", payload.items.map((x) => ({ time: x.time, value: x.ma120 })));
+  const ma240Series = addSeries(priceChart, "#64748b", payload.items.map((x) => ({ time: x.time, value: x.ma240 })));
+
+  const priceMarkers = [];
+  const crossRules = [
+    { a: "ma5", b: "ma20", label: "5/20" },
+    { a: "ma5", b: "ma60", label: "5/60" },
+    { a: "ma20", b: "ma60", label: "20/60" },
+  ];
+  for (let i = 1; i < payload.items.length; i += 1) {
+    const p = payload.items[i - 1];
+    const c = payload.items[i];
+    for (const rule of crossRules) {
+      const pa = p[rule.a], pb = p[rule.b], ca = c[rule.a], cb = c[rule.b];
+      if (pa === null || pb === null || ca === null || cb === null) continue;
+      if (pa <= pb && ca > cb) {
+        priceMarkers.push({ time: c.time, position: "belowBar", color: "#2563eb", shape: "circle", text: rule.label });
+      } else if (pa >= pb && ca < cb) {
+        priceMarkers.push({ time: c.time, position: "aboveBar", color: "#ef4444", shape: "circle", text: rule.label });
+      }
+    }
+  }
+  candles.setMarkers(priceMarkers);
+
+  const vol = volumeChart.addHistogramSeries({
+    priceFormat: { type: "volume" },
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  vol.setData(
+    payload.items.map((x) => ({
+      time: x.time,
+      value: x.volume || 0,
+      color: x.close >= x.open ? "#ef4444" : "#2563eb",
+    })),
+  );
+
+  const hist = macdChart.addHistogramSeries({
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  hist.setData(
+    payload.items.map((x) => ({
+      time: x.time,
+      value: x.histogram ?? 0,
+      color: (x.histogram ?? 0) >= 0 ? "#ef4444" : "#2563eb",
+    })),
+  );
+  const macdLine = addSeries(macdChart, "#0284c7", payload.items.map((x) => ({ time: x.time, value: x.macd })));
+  addSeries(macdChart, "#f59e0b", payload.items.map((x) => ({ time: x.time, value: x.signal })));
+
+  const macdMarkers = [];
+  for (let i = 1; i < payload.items.length; i += 1) {
+    const p = payload.items[i - 1];
+    const c = payload.items[i];
+    if (p.macd === null || p.signal === null || c.macd === null || c.signal === null) continue;
+    if (p.macd <= p.signal && c.macd > c.signal) {
+      macdMarkers.push({ time: c.time, position: "belowBar", color: "#ef4444", shape: "arrowUp", text: "골든" });
+    } else if (p.macd >= p.signal && c.macd < c.signal) {
+      macdMarkers.push({ time: c.time, position: "aboveBar", color: "#2563eb", shape: "arrowDown", text: "데드" });
+    }
+  }
+  macdLine.setMarkers(macdMarkers);
+
+  const ichiAll = ichimokuPayload?.items || payload.items;
+  const keep = Math.max(30, state.ichimokuDays || 120);
+  const start = Math.max(0, ichiAll.length - keep);
+  const ichiSource = ichiAll.slice(start);
+  const ichiCandles = ichimokuChart.addCandlestickSeries({
+    upColor: "#ef4444",
+    downColor: "#2563eb",
+    borderUpColor: "#ef4444",
+    borderDownColor: "#2563eb",
+    wickUpColor: "#ef4444",
+    wickDownColor: "#2563eb",
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  ichiCandles.setData(
+    ichiSource.map((x) => ({ time: x.time, open: x.open, high: x.high, low: x.low, close: x.close })),
+  );
+  const ichiFull = computeIchimoku(ichiAll);
+  const ichi = ichiFull.slice(start);
+  const tenkanSeries = addSeries(ichimokuChart, "#9ca3af", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.tenkan ?? null })));
+  const kijunSeries = addSeries(ichimokuChart, "#22c1dd", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.kijun ?? null })));
+  const chikouSeries = addSeries(ichimokuChart, "#111827", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.chikou ?? null })));
+  const senkouASeries = addSeries(ichimokuChart, "#fb7185", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.senkouA ?? null })));
+  const senkouBSeries = addSeries(ichimokuChart, "#3b82f6", ichiSource.map((x, i) => ({ time: x.time, value: ichi[i]?.senkouB ?? null })));
+  const cloudOverlay = drawIchimokuCloud(els.ichimokuChart, ichimokuChart, ichiSource, ichi, true);
+
+  syncCrosshair(priceChart, [volumeChart, macdChart]);
+  syncCrosshair(volumeChart, [priceChart, macdChart]);
+  syncCrosshair(macdChart, [priceChart, volumeChart]);
+  syncTimeScales([priceChart, volumeChart, macdChart]);
+  const baseRange = priceChart.timeScale().getVisibleLogicalRange();
+  if (baseRange) {
+    volumeChart.timeScale().setVisibleLogicalRange(baseRange);
+    macdChart.timeScale().setVisibleLogicalRange(baseRange);
+  }
+
+  // Always render the price legend first, even if lower panels fail.
+  makeLegend(els.priceLegend, [
+    { label: "캔들", color: "#475569", series: candles, visible: true },
+    { label: "5일", color: "#f59e0b", series: ma5Series, visible: true },
+    { label: "10일", color: "#f97316", series: ma10Series, visible: true },
+    { label: "20일", color: "#ec4899", series: ma20Series, visible: true },
+    { label: "60일", color: "#10b981", series: ma60Series, visible: true },
+    { label: "120일", color: "#8b5cf6", series: ma120Series, visible: true },
+    { label: "240일", color: "#64748b", series: ma240Series, visible: true },
+  ]);
+  try {
+    makeLegend(els.ichimokuLegend, [
+      { label: "캔들", color: "#475569", series: ichiCandles, visible: true },
+      { label: "전환선", color: "#9ca3af", series: tenkanSeries, visible: true },
+      { label: "기준선", color: "#22c1dd", series: kijunSeries, visible: true },
+      { label: "후행선", color: "#111827", series: chikouSeries, visible: true },
+      { label: "선행1", color: "#fb7185", series: senkouASeries, visible: true },
+      { label: "선행2", color: "#3b82f6", series: senkouBSeries, visible: true },
+      { label: "양운/음운", color: "#ef4444", series: { applyOptions: ({ visible }) => cloudOverlay.setVisible(visible !== false) }, visible: true },
+    ]);
+  } catch {
+    // Keep price legend available even if ichimoku legend fails.
+  }
+}
+
+async function loadChartData() {
+  if (!state.selectedCode) return;
+  const params = new URLSearchParams({
+    market: state.market,
+    code: state.selectedCode,
+    days: String(state.chartFetchDays),
+    timeframe: state.chartTimeframe,
+  });
+  const ichiParams = new URLSearchParams({
+    market: state.market,
+    code: state.selectedCode,
+    days: String(Math.min(1200, state.ichimokuDays + 260)),
+    timeframe: state.ichimokuTimeframe,
+  });
+  const [response, ichiResponse] = await Promise.all([
+    fetch(`/api/ohlcv?${params.toString()}`),
+    fetch(`/api/ohlcv?${ichiParams.toString()}`),
+  ]);
+  const payload = await response.json();
+  const ichiPayload = await ichiResponse.json();
+  if (!response.ok || !ichiResponse.ok) {
+    throw new Error(payload.detail || ichiPayload.detail || payload.error || ichiPayload.error || "차트 데이터 요청 실패");
+  }
+  els.chartTitle.textContent = `${state.selectedName} (${state.selectedCode})`;
+  openChartModal();
+  const sliced = { ...payload, items: payload.items.slice(-state.chartDays) };
+  renderCharts(sliced, ichiPayload);
 }
 
 function updateChrome() {
@@ -399,6 +815,20 @@ function render() {
 
   updateMetrics(items);
   renderRows(items);
+
+  els.rows.querySelectorAll(".stock-link").forEach((link) => {
+    link.addEventListener("click", async (event) => {
+      event.preventDefault();
+      state.selectedCode = link.dataset.code || "";
+      state.selectedName = link.dataset.name || "";
+      try {
+        await loadChartData();
+      } catch (error) {
+        state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+        render();
+      }
+    });
+  });
 }
 
 async function loadStocks(forceRefresh = false) {
@@ -470,6 +900,59 @@ els.sortSelect.addEventListener("change", (event) => {
 els.refreshButton.addEventListener("click", () => {
   loadStocks(true);
 });
+
+els.applyDaysButton.addEventListener("click", async () => {
+  const days = Number(els.daysInput.value || 120);
+  state.chartDays = Math.max(30, Math.min(1200, days));
+  els.daysInput.value = String(state.chartDays);
+  try {
+    await loadChartData();
+  } catch (error) {
+    state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+    render();
+  }
+});
+
+els.periodButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    state.chartTimeframe = button.dataset.timeframe || "day";
+    els.periodButtons.forEach((b) => b.classList.toggle("is-active", b === button));
+    try {
+      await loadChartData();
+    } catch (error) {
+      state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+      render();
+    }
+  });
+});
+
+els.ichimokuPeriodButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    state.ichimokuTimeframe = button.dataset.ichiTimeframe || "day";
+    els.ichimokuPeriodButtons.forEach((b) => b.classList.toggle("is-active", b === button));
+    try {
+      await loadChartData();
+    } catch (error) {
+      state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+      render();
+    }
+  });
+});
+
+els.applyIchimokuDaysButton.addEventListener("click", async () => {
+  const days = Number(els.ichimokuDaysInput.value || 120);
+  state.ichimokuDays = Math.max(30, Math.min(1200, days));
+  els.ichimokuDaysInput.value = String(state.ichimokuDays);
+  try {
+    await loadChartData();
+  } catch (error) {
+    state.error = `차트 데이터를 가져오지 못했습니다. ${error.message}`;
+    render();
+  }
+});
+
+els.chartBackdrop.addEventListener("click", closeChartModal);
+els.closeChartButton.addEventListener("click", closeChartModal);
 
 els.marketButtons.forEach((button) => {
   button.addEventListener("click", () => {

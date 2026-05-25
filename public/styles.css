@@ -230,15 +230,147 @@ select:focus,
   overflow: auto;
 }
 
+.chart-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 50;
+}
+
+.chart-modal.is-open {
+  display: block;
+}
+
+.chart-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.chart-modal-content {
+  position: relative;
+  width: min(1200px, calc(100% - 30px));
+  max-height: calc(100vh - 32px);
+  margin: 16px auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.chart-header label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-header input {
+  width: 100px;
+  min-height: 36px;
+}
+
+.chart-header button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  padding: 0 14px;
+}
+
+.period-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.period-btn {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #eef2ff;
+  color: #1e3a8a;
+  font-weight: 700;
+}
+
+.period-btn.is-active {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.chart-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.chart-box {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.chart-legend {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 2px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.chart-subheader {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.chart-subheader label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.legend-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.legend-btn.is-off {
+  opacity: 0.45;
+}
+
+.chart-price { height: 420px; }
+.chart-volume { height: 180px; }
+.chart-macd { height: 220px; }
+.chart-ichimoku { height: 240px; }
+
 table {
   width: 100%;
-  min-width: 1240px;
+  min-width: 1320px;
   border-collapse: collapse;
 }
 
 th,
 td {
-  padding: 14px 16px;
+  padding: 12px 12px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -251,6 +383,10 @@ th {
   color: #344054;
   font-size: 0.82rem;
   text-align: left;
+}
+
+#rankHeader {
+  white-space: nowrap;
 }
 
 tbody tr:hover {
@@ -268,10 +404,22 @@ tbody tr:hover {
   font-weight: 800;
 }
 
+/* Tighten spacing between 종목(2nd col) and 현재가(3rd col) */
+thead th:nth-child(2),
+tbody td:nth-child(2) {
+  padding-right: 6px;
+}
+
+thead th:nth-child(3),
+tbody td:nth-child(3) {
+  padding-left: 6px;
+}
+
 .stock-name {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  min-width: 120px;
 }
 
 .stock-name a {
@@ -286,7 +434,7 @@ tbody tr:hover {
 
 .code {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
 }
 
 .sector {
