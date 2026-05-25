@@ -258,14 +258,7 @@ select:focus,
   background: var(--surface);
   box-shadow: var(--shadow);
   overflow-y: auto;
-  overflow-x: auto;
   overscroll-behavior: contain;
-}
-
-/* 차트 스택 최소 너비 — 팝업이 좁으면 가로 스크롤 */
-.chart-header,
-.chart-stack {
-  min-width: 680px;
 }
 
 .chart-header {

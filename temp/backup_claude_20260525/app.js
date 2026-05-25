@@ -415,12 +415,8 @@ function syncCrosshair(sourceChart, targetDefs) {
       }
       return;
     }
-    // param.time can be a string "YYYY-MM-DD" or a number; normalise to string key
-    const timeKey = typeof param.time === "object"
-      ? `${param.time.year}-${String(param.time.month).padStart(2,"0")}-${String(param.time.day).padStart(2,"0")}`
-      : String(param.time);
     for (const target of targetDefs) {
-      const value = target.valueByTime.get(timeKey);
+      const value = target.valueByTime.get(param.time);
       if (!Number.isFinite(value)) continue;
       if (typeof target.chart.setCrosshairPosition === "function") {
         target.chart.setCrosshairPosition(value, param.time, target.series);
@@ -481,58 +477,6 @@ function buildCloudBands(ichiSource, ichi) {
   return { upBand, downBand };
 }
 
-/* ─── MACD 부호에 따라 캔들 차트 배경을 빨간/파란 반투명으로 채운다 ─── */
-function drawMacdBackground(container, chart, items) {
-  const existing = container.querySelector(".macd-bg-overlay");
-  if (existing) existing.remove();
-
-  const canvas = document.createElement("canvas");
-  canvas.className = "macd-bg-overlay";
-  Object.assign(canvas.style, {
-    position: "absolute",
-    inset: "0",
-    pointerEvents: "none",
-    zIndex: "0",
-  });
-  container.insertBefore(canvas, container.firstChild);
-
-  const dpr = window.devicePixelRatio || 1;
-
-  const paint = () => {
-    const rect = container.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, rect.width, rect.height);
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (!Number.isFinite(item.macd)) continue;
-      const x1 = chart.timeScale().timeToCoordinate(item.time);
-      if (x1 === null) continue;
-      let x2;
-      if (i + 1 < items.length) {
-        x2 = chart.timeScale().timeToCoordinate(items[i + 1].time);
-        if (x2 === null) x2 = x1 + 8;
-      } else {
-        x2 = x1 + 8;
-      }
-      const color = item.macd >= 0 ? "rgba(239,68,68,0.07)" : "rgba(37,99,235,0.07)";
-      ctx.fillStyle = color;
-      ctx.fillRect(x1, 0, x2 - x1 + 0.5, rect.height);
-    }
-  };
-
-  requestAnimationFrame(() => {
-    paint();
-    chart.timeScale().subscribeVisibleTimeRangeChange(paint);
-  });
-}
-
 function drawIchimokuCloud(container, chart, ichiSource, ichi, visible = true) {
   const existing = container.querySelector(".ichi-cloud-overlay");
   if (existing) existing.remove();
@@ -581,7 +525,6 @@ function drawIchimokuCloud(container, chart, ichiSource, ichi, visible = true) {
     drawColor((a, b) => a < b, "rgba(37,99,235,0.20)");
   };
   paint();
-  requestAnimationFrame(paint); // 차트가 실제로 렌더된 뒤 한 번 더 보정
   chart.timeScale().subscribeVisibleTimeRangeChange(paint);
   return {
     setVisible: (v) => {
@@ -722,7 +665,6 @@ function renderCharts(payload, ichimokuPayload) {
     }
   }
   candles.setMarkers(priceMarkers);
-  drawMacdBackground(els.priceChart, priceChart, payload.items);
 
   const vol = volumeChart.addHistogramSeries({
     priceFormat: { type: "volume" },
@@ -1036,7 +978,6 @@ els.refreshButton.addEventListener("click", () => {
 els.applyDaysButton.addEventListener("click", async () => {
   const days = Number(els.daysInput.value || 120);
   state.chartDays = Math.max(30, Math.min(1200, days));
-  state.chartFetchDays = Math.max(state.chartDays + 100, 700); // 충분한 히스토리 확보
   els.daysInput.value = String(state.chartDays);
   try {
     await loadChartData();
